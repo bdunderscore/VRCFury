@@ -1,6 +1,9 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using VF.Builder;
 using VF.Builder.Exceptions;
 using VF.Builder.Haptics;
@@ -75,6 +78,47 @@ namespace VF.Menu {
         [MenuItem(nukeZawoo, true)]
         private static bool CheckNukeZawooParts() {
             return MenuUtils.GetSelectedAvatar() != null;
+        }
+
+        [MenuItem("Tools/VRCFuryAnimTest")]
+        private static void RunAnimTest() {
+            var originalObject = (VFGameObject)MenuUtils.GetSelectedAvatar();
+            originalObject.active = false;
+
+            var clone = originalObject.Clone();
+            clone.active = true;
+            if (clone.scene != originalObject.scene) {
+                SceneManager.MoveGameObjectToScene(clone, originalObject.scene);
+            }
+
+            clone.name = "VRCFury Recording Copy";
+            foreach (var an in clone.GetComponentsInSelfAndChildren<Animator>()) {
+                Object.DestroyImmediate(an);
+            }
+            foreach (var a in clone.GetComponentsInSelfAndChildren<Animation>()) {
+                Object.DestroyImmediate(a);
+            }
+            var animator = clone.AddComponent<Animator>();
+            var controller = new AnimatorController();
+            animator.runtimeAnimatorController = controller;
+            controller.AddLayer("Temp Controller For Recording");
+            var layer = controller.layers.Last();
+            var state = layer.stateMachine.AddState("Main");
+            var animClip = AssetDatabase.LoadAssetAtPath<AnimationClip>("Assets/Avatars/SenkyMeelo/Emotes/MeeloAnubis.anim");
+            state.motion = animClip;
+
+            var animStateType = ReflectionUtils.GetTypeFromAnyAssembly("UnityEditorInternal.AnimationWindowState");
+            var animState = Resources.FindObjectsOfTypeAll(animStateType)[0];
+            var selectionField = animStateType.GetProperty("selection");
+            var selection = selectionField.GetValue(animState);
+            var gameObjectField = selection.GetType().GetProperty("gameObject");
+            gameObjectField.SetValue(selection, (GameObject)clone);
+            var animationClipField = animStateType.GetProperty("activeAnimationClip");
+            animationClipField.SetValue(animState, animClip);
+            var startRecording = animStateType.GetMethod("StartRecording");
+            startRecording.Invoke(animState, new object[] { });
+            
+            Debug.Log("Hello world");
         }
 
         [MenuItem(testCopy, priority = testCopyPriority)]

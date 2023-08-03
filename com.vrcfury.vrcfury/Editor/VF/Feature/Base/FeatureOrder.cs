@@ -74,6 +74,8 @@ namespace VF.Feature.Base {
         FixMasks,
         FixMaterialSwapWithMask,
         ControllerConflictCheck,
+        PlayableLayerControlRewrite,
+        VRCBehaviourRewrite,
         FixWriteDefaults,
         AnimatorLayerControlFix,
         FinalizeController,

@@ -110,8 +110,9 @@ namespace VF.Builder {
 
         public int childCount => transform.childCount;
         
-        public UnityEngine.Component GetComponent(Type t) {
-            return gameObject.GetComponent(t);
+        public UnityEngine.Component GetComponent(Type type) {
+            if (type == null || !typeof(UnityEngine.Component).IsAssignableFrom(type)) return null;
+            return gameObject.GetComponent(type);
         }
         
         public T GetComponent<T>() where T : UnityEngine.Component {

@@ -9,9 +9,9 @@ namespace VF.Feature {
     public class CleanupEmptyLayersBuilder : FeatureBuilder {
         [FeatureBuilderAction(FeatureOrder.CleanupEmptyLayers)]
         public void Apply() {
-            foreach (var c in manager.GetAllUsedControllers()) {
-                var removedBindings = new List<string>();
+            var removedBindings = new List<string>();
 
+            foreach (var c in manager.GetAllUsedControllers()) {
                 // Delete bindings targeting things that don't exist
                 foreach (var clip in new AnimatorIterator.Clips().From(c.GetRaw())) {
                     clip.Rewrite(AnimationRewriter.RewriteBinding(binding => {
@@ -21,12 +21,6 @@ namespace VF.Feature {
                         }
                         return binding;
                     }));
-                }
-
-                if (removedBindings.Count > 0) {
-                    Debug.LogWarning(
-                        $"Removed {removedBindings.Count} properties from animation clips that targeted objects that do not exist:\n" +
-                        string.Join("\n", removedBindings));
                 }
 
                 // Delete empty layers
@@ -42,6 +36,12 @@ namespace VF.Feature {
                         c.RemoveLayer(layer);
                     }
                 }
+            }
+            
+            if (removedBindings.Count > 0) {
+                Debug.LogWarning(
+                    $"Removed {removedBindings.Count} properties from animation clips that targeted objects that do not exist:\n" +
+                    string.Join("\n", removedBindings));
             }
         }
     }

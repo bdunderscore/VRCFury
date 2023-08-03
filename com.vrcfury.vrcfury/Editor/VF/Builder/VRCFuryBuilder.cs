@@ -179,6 +179,8 @@ public class VRCFuryBuilder {
         AddBuilder(new RestingStateBuilder(), avatarObject);
         AddBuilder(new PullMusclesOutOfFxBuilder(), avatarObject);
         AddBuilder(new RestoreProxyClipsBuilder(), avatarObject);
+        AddBuilder(new PlayableLayerControlRewriteBuilder(), avatarObject);
+        AddBuilder(new VRCBehaviourRewriterBuilder(), avatarObject);
         
         while (actions.Count > 0) {
             var action = actions.Min();

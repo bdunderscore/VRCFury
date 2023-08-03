@@ -39,9 +39,8 @@ namespace VF.Feature {
         [FeatureBuilderAction(FeatureOrder.ApplyRestState1)]
         public void ApplyPendingClips() {
             foreach (var clip in pendingClips) {
-                clip.SampleAnimation(avatarObject, 0);
                 foreach (var (binding,curve) in clip.GetAllCurves()) {
-                    HandleMaterialProperties(binding, curve);
+                    ApplyPropertyToAvatar(binding, curve);
                     StoreBinding(binding, curve.GetFirst());
                 }
             }
@@ -83,23 +82,39 @@ namespace VF.Feature {
             };
         }
 
-        private void HandleMaterialProperties(EditorCurveBinding binding, FloatOrObjectCurve curve) {
+        private void ApplyPropertyToAvatar(EditorCurveBinding binding, FloatOrObjectCurve curve) {
+            var obj = avatarObject.Find(binding.path);
+            if (!obj) return;
+            var component = obj.GetComponent(binding.type);
+            if (!component) return;
             var val = curve.GetFirst();
-            if (!val.IsFloat()) return;
-            if (!binding.propertyName.StartsWith("material.")) return;
-            var propName = binding.propertyName.Substring("material.".Length);
-            var transform = avatarObject.Find(binding.path);
-            if (!transform) return;
-            if (binding.type == null || !typeof(UnityEngine.Component).IsAssignableFrom(binding.type)) return;
-            var renderer = transform.GetComponent(binding.type) as Renderer;
-            if (!renderer) return;
-            renderer.sharedMaterials = renderer.sharedMaterials.Select(mat => {
-                if (!mat.HasProperty(propName)) return mat;
-                mat = mutableManager.MakeMutable(mat, false);
-                mat.SetFloat(propName, val.GetFloat());
-                return mat;
-            }).ToArray();
-            VRCFuryEditorUtils.MarkDirty(renderer);
+
+            if (component is Renderer renderer && binding.propertyName.StartsWith("material.")) {
+                var propName = binding.propertyName.Substring("material.".Length);
+                renderer.sharedMaterials = renderer.sharedMaterials.Select(mat => {
+                    if (!mat.HasProperty(propName)) return mat;
+                    mat = mutableManager.MakeMutable(mat, false);
+                    mat.SetFloat(propName, val.GetFloat());
+                    return mat;
+                }).ToArray();
+                VRCFuryEditorUtils.MarkDirty(renderer);
+            } else {
+                var so = new SerializedObject(component);
+                var prop = so.FindProperty(binding.propertyName);
+                if (prop == null) return;
+                if (prop.propertyType == SerializedPropertyType.ObjectReference && !val.IsFloat()) {
+                    prop.objectReferenceValue = val.GetObject();
+                } else if (prop.propertyType == SerializedPropertyType.Float && val.IsFloat()) {
+                    prop.floatValue = val.GetFloat();
+                } else if (prop.propertyType == SerializedPropertyType.Integer && val.IsFloat()) {
+                    prop.intValue = (int)val.GetFloat();
+                } else if (prop.propertyType == SerializedPropertyType.Boolean && val.IsFloat()) {
+                    prop.boolValue = val.GetFloat() != 0;
+                } else {
+                    Debug.LogWarning("Failed to find property " + binding);
+                }
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
         }
     }
 }

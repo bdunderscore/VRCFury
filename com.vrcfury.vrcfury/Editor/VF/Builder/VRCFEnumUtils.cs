@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace VF.Builder {
     public class VRCFEnumUtils {
@@ -16,6 +17,14 @@ namespace VF.Builder {
             } catch(Exception) {
                 return default;
             }
+        }
+        
+        public static T[] GetValues<T>() where T : Enum {
+            var output = new List<T>();
+            foreach (var i in Enum.GetValues(typeof(T))) {
+                output.Add((T)i);
+            }
+            return output.ToArray();
         }
     }
 }
