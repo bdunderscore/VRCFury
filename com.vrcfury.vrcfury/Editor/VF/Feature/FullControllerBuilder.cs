@@ -374,9 +374,49 @@ namespace VF.Feature {
             content.Add(VRCFuryEditorUtils.WrappedLabel("Parameters:"));
             content.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("prms"),
                 (i, el) => VRCFuryEditorUtils.Prop(el.FindPropertyRelative("parameters"))));
+
+            content.Add(VRCFuryEditorUtils.WrappedLabel("Global Parameters:"));
+            content.Add(VRCFuryEditorUtils.WrappedLabel(
+                "Parameters in this list will have their name kept as is, allowing you to interact with " +
+                "parameters in the avatar itself or other instances of the prop. Note that VRChat global " +
+                "parameters (such as gestures) are included by default."));
+            content.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("globalParams")));
             
-            content.Add(VRCFuryEditorUtils.WrappedLabel("Smoothed Parameters:"));
-            content.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("smoothedPrms"),
+            content.Add(VRCFuryEditorUtils.WrappedLabel("Rewrite animation clips:"));
+            content.Add(VRCFuryEditorUtils.WrappedLabel(
+                "This allows you to rewrite the binding paths used in the animation clips of this controller. Useful if the animations" +
+                " in the controller were originally written to be based from a specific avatar root," +
+                " but you are now trying to use as a re-usable VRCFury prop."));
+            content.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("rewriteBindings"), (i, rewrite) => {
+                var row = new VisualElement();
+                row.Add(VRCFuryEditorUtils.WrappedLabel("If animated path has this prefix:"));
+                row.Add(VRCFuryEditorUtils.Prop(rewrite.FindPropertyRelative("from"), style: s => s.paddingLeft = 15));
+                row.Add(VRCFuryEditorUtils.WrappedLabel("Then:"));
+                var deleteProp = rewrite.FindPropertyRelative("delete");
+                var selector = new PopupField<string>(new List<string>{ "Rewrite the prefix to", "Delete it" }, deleteProp.boolValue ? 1 : 0);
+                selector.style.paddingLeft = 15;
+                row.Add(selector);
+                var to = VRCFuryEditorUtils.Prop(rewrite.FindPropertyRelative("to"), style: s => s.paddingLeft = 15);
+                row.Add(to);
+
+                void Update() {
+                    deleteProp.boolValue = selector.index == 1;
+                    deleteProp.serializedObject.ApplyModifiedProperties();
+                    to.style.display = deleteProp.boolValue ? DisplayStyle.None : DisplayStyle.Flex;
+                }
+                selector.RegisterValueChangedCallback(str => Update());
+                Update();
+                
+                return row;
+            }));
+
+            var adv = new Foldout {
+                text = "Advanced Options",
+                value = false
+            };
+            
+            adv.Add(VRCFuryEditorUtils.WrappedLabel("Smoothed Parameters:"));
+            adv.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("smoothedPrms"),
                 (i, el) =>
                 {
                     var wrapper = new VisualElement();
@@ -440,47 +480,6 @@ namespace VF.Feature {
 
                     return wrapper;
                 }));
-
-
-            content.Add(VRCFuryEditorUtils.WrappedLabel("Global Parameters:"));
-            content.Add(VRCFuryEditorUtils.WrappedLabel(
-                "Parameters in this list will have their name kept as is, allowing you to interact with " +
-                "parameters in the avatar itself or other instances of the prop. Note that VRChat global " +
-                "parameters (such as gestures) are included by default."));
-            content.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("globalParams")));
-            
-            content.Add(VRCFuryEditorUtils.WrappedLabel("Rewrite animation clips:"));
-            content.Add(VRCFuryEditorUtils.WrappedLabel(
-                "This allows you to rewrite the binding paths used in the animation clips of this controller. Useful if the animations" +
-                " in the controller were originally written to be based from a specific avatar root," +
-                " but you are now trying to use as a re-usable VRCFury prop."));
-            content.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("rewriteBindings"), (i, rewrite) => {
-                var row = new VisualElement();
-                row.Add(VRCFuryEditorUtils.WrappedLabel("If animated path has this prefix:"));
-                row.Add(VRCFuryEditorUtils.Prop(rewrite.FindPropertyRelative("from"), style: s => s.paddingLeft = 15));
-                row.Add(VRCFuryEditorUtils.WrappedLabel("Then:"));
-                var deleteProp = rewrite.FindPropertyRelative("delete");
-                var selector = new PopupField<string>(new List<string>{ "Rewrite the prefix to", "Delete it" }, deleteProp.boolValue ? 1 : 0);
-                selector.style.paddingLeft = 15;
-                row.Add(selector);
-                var to = VRCFuryEditorUtils.Prop(rewrite.FindPropertyRelative("to"), style: s => s.paddingLeft = 15);
-                row.Add(to);
-
-                void Update() {
-                    deleteProp.boolValue = selector.index == 1;
-                    deleteProp.serializedObject.ApplyModifiedProperties();
-                    to.style.display = deleteProp.boolValue ? DisplayStyle.None : DisplayStyle.Flex;
-                }
-                selector.RegisterValueChangedCallback(str => Update());
-                Update();
-                
-                return row;
-            }));
-
-            var adv = new Foldout {
-                text = "Advanced Options",
-                value = false
-            };
             
             adv.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("ignoreSaved"), "Force all synced parameters to be un-saved"));
             adv.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("rootBindingsApplyToAvatar"), "Root bindings always apply to avatar (Basically only for gogoloco)"));
