@@ -49,6 +49,7 @@ For more information, please refer to <https://unlicense.org>
 
 * Morghus
   * Created numerous setup prefabs
+  * Add smoothing support to Full Controller
 * GameGeek720
   * Added Toggle enhancements for transitions and the local player
 * Raphiiko

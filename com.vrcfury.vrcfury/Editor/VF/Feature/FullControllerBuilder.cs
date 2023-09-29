@@ -111,6 +111,36 @@ namespace VF.Feature {
                     physbone.parameter = RewriteParamName(physbone.parameter);
                 }
             }
+            
+            // Smoothing
+            foreach (var ctrl in manager.GetAllUsedControllers()) {
+                var smoothedMap = new Dictionary<string, VFAFloat>();
+                foreach (var p in ctrl.GetRaw().parameters) {
+                    if (p.type != AnimatorControllerParameterType.Float) continue;
+                    var origName = rewrittenParams
+                        .Where(pair => pair.Value == p.name)
+                        .Select(pair => pair.Key)
+                        .FirstOrDefault();
+                    // we don't support smoothing global parameters right now, because it would allow this controller
+                    // to interfere with the usages of the params in other controllers unrelated to this merge
+                    if (origName == p.name) continue;
+                    var smoothingDefinition = model.smoothedPrms.FirstOrDefault(s => s.name == origName);
+                    if (smoothingDefinition == null) continue;
+                    var target = new VFAFloat(p);
+                    var smoothed = smoothing.Smooth(
+                        p.name, 
+                        target, 
+                        smoothingDefinition.smoothingDuration,
+                        ctrl: ctrl);
+                    smoothedMap.Add(p.name, smoothed);
+                }
+                ((AnimatorController)ctrl.GetRaw()).RewriteParameters(param => {
+                    if (smoothedMap.TryGetValue(param, out var smoothParam)) {
+                        return smoothParam.Name();
+                    }
+                    return param;
+                }, includeWrites: false);
+            }
 
             if (missingAssets.Count > 0) {
                 if (model.allowMissingAssets) {
@@ -260,23 +290,6 @@ namespace VF.Feature {
             // Rewrite params
             // (we do this after rewriting paths to ensure animator bindings all hit "")
             ((AnimatorController)from).RewriteParameters(RewriteParamName);
-
-            var smoothedParams = model.smoothedPrms.ToDictionary(x => RewriteParamName(x.name), x => x);
-            var fromParams = from.parameters.ToDictionary(x => x.name, x => x);
-            from.RewriteParameters(param => 
-            {
-                if (string.IsNullOrWhiteSpace(param)) return param;
-                if (!fromParams.ContainsKey(param) || fromParams[param].type != AnimatorControllerParameterType.Float) return param;
-                if (smoothedParams.TryGetValue(param, out var smoothParam))
-                {
-                    var result = smoothing.Smooth(
-                        param, 
-                        new VFAFloat(fromParams[param]), 
-                        smoothParam.smoothingDuration);
-                    return result.Name();
-                }
-                return param;
-            }, includeWrites: false);
 
             // Merge base mask
             if (type == VRCAvatarDescriptor.AnimLayerType.Gesture && from.layers.Length > 0) {
