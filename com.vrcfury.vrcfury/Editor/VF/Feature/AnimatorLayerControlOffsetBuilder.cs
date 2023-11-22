@@ -16,8 +16,8 @@ namespace VF.Feature {
      * while doing other things.
      */
     public class AnimatorLayerControlOffsetBuilder : FeatureBuilder {
-        private Dictionary<VRCAnimatorLayerControl, AnimatorStateMachine> mapping
-            = new Dictionary<VRCAnimatorLayerControl, AnimatorStateMachine>();
+        private VFMultimap<VRCAnimatorLayerControl, AnimatorStateMachine> mapping
+            = new VFMultimap<VRCAnimatorLayerControl, AnimatorStateMachine>();
         
         [FeatureBuilderAction(FeatureOrder.AnimatorLayerControlRecordBase)]
         public void RecordBase() {
@@ -46,21 +46,24 @@ namespace VF.Feature {
                 foreach (var l in c.GetLayers()) {
                     AnimatorIterator.ForEachBehaviourRW(l, (b, add) => {
                         if (!(b is VRCAnimatorLayerControl control)) return true;
-                        if (!mapping.TryGetValue(control, out var targetSm)) {
-                            Debug.LogError("Removing invalid AnimatorLayerControl (not found in mapping??) " + b);
-                            return false;
+                        foreach (var targetSm in mapping.Get(control)) {
+                            if (!smToTypeAndNumber.TryGetValue(targetSm, out var pair)) {
+                                continue;
+                            }
+                            var (newType, newI) = pair;
+                            var newCastedType = VRCFEnumUtils.Parse<VRC_AnimatorLayerControl.BlendableLayer>(
+                                VRCFEnumUtils.GetName(newType));
+                            control.playable = newCastedType;
+                            control.layer = newI;
+
+                            var added = (VRCAnimatorLayerControl)add(typeof(VRCAnimatorLayerControl));
+                            added.playable = newCastedType;
+                            added.layer = newI;
+                            added.goalWeight = control.goalWeight;
+                            added.blendDuration = control.blendDuration;
+                            added.debugString = control.debugString;
                         }
-                        if (!smToTypeAndNumber.TryGetValue(targetSm, out var pair)) {
-                            Debug.LogError("Removing invalid AnimatorLayerControl (target sm has disappeared) " + b);
-                            return false;
-                        }
-                        var (newType, newI) = pair;
-                        var newCastedType = VRCFEnumUtils.Parse<VRC_AnimatorLayerControl.BlendableLayer>(
-                            VRCFEnumUtils.GetName(newType));
-                        Debug.LogWarning($"Rewriting {b} from {control.playable}:{control.layer} to {newCastedType}:{newI}");
-                        control.playable = newCastedType;
-                        control.layer = newI;
-                        return true;
+                        return false;
                     });
                 }
             }
@@ -89,7 +92,15 @@ namespace VF.Feature {
         }
         
         public void Register(VRCAnimatorLayerControl control, AnimatorStateMachine targetSm) {
-            mapping[control] = targetSm;
+            mapping.Put(control, targetSm);
+        }
+
+        public void NotifyOfCopiedStateMachine(AnimatorStateMachine from, AnimatorStateMachine to) {
+            foreach (var control in mapping.GetKeys()) {
+                if (mapping.Get(control).Contains(from) && !mapping.Get(control).Contains(to)) {
+                    mapping.Put(control, to);
+                }
+            }
         }
     }
 }

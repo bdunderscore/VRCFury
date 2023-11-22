@@ -83,7 +83,7 @@ namespace VF.Builder {
             return unityObj;
         }
 
-        public static T CopyRecursive<T>(T obj, bool addPrefix = true) where T : Object {
+        public static T CopyRecursive<T>(T obj, bool addPrefix = true, Action<Object,Object> onCopy = null) where T : Object {
             var originalToMutable = new Dictionary<Object, Object>();
             var mutableToOriginal = new Dictionary<Object, Object>();
 
@@ -97,6 +97,7 @@ namespace VF.Builder {
                 }
 
                 var copy = MakeMutable(original, true);
+                onCopy?.Invoke(original, copy);
                 if (obj == original) rootCopy = copy as T;
 
                 if (IsType(copy, hiddenTypes)) {

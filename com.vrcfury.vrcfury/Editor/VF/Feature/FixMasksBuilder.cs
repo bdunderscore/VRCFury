@@ -2,106 +2,162 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 using VF.Builder;
 using VF.Feature.Base;
+using VF.Injector;
+using VF.Service;
 using VF.Utils;
 using VF.Utils.Controller;
 using VRC.SDK3.Avatars.Components;
 
 namespace VF.Feature {
     public class FixMasksBuilder : FeatureBuilder {
+        [VFAutowired] private AnimatorLayerControlOffsetBuilder animatorLayerControlOffsetBuilder;
+        [VFAutowired] private LayerSourceService layerSourceService;
+        
         [FeatureBuilderAction(FeatureOrder.FixGestureFxConflict)]
         public void FixGestureFxConflict() {
-            if (manager.GetAllUsedControllers().All(c => c.GetType() != VRCAvatarDescriptor.AnimLayerType.Gesture)) {
-                // No customized gesture controller
-                return;
-            }
-            var gesture = manager.GetController(VRCAvatarDescriptor.AnimLayerType.Gesture);
-
-            var gestureContainsTransform = gesture.GetClips()
-                .SelectMany(clip => clip.GetAllBindings())
-                .Any(binding => binding.type == typeof(Transform));
-
-            var activateGestureToFxTransfer = gestureContainsTransform || DoesFxControlHands();
-            if (!activateGestureToFxTransfer) {
-                return;
-            }
-
+            // Merge Gesture into FX
             var fx = manager.GetFx();
-            fx.TakeOwnershipOf(gesture.GetRaw(), putOnTop: true);
+            var gesture = manager.GetController(VRCAvatarDescriptor.AnimLayerType.Gesture);
+            fx.TakeOwnershipOf(gesture.GetRaw(), putOnTop: true, prefix: false);
+
+            // Make Gesture an exact copy of FX
+            var fxCopy = MutableManager.CopyRecursive((AnimatorController)fx.GetRaw(), false, (orig, copy) => {
+                if (orig is AnimatorStateMachine origSm && copy is AnimatorStateMachine copySm) {
+                    animatorLayerControlOffsetBuilder.NotifyOfCopiedStateMachine(origSm, copySm);
+                    layerSourceService.CopySource(origSm, copySm);
+                }
+            });
+            gesture.TakeOwnershipOf(fxCopy, prefix: false);
+
+            var fxLayers = fx.GetLayers().ToArray();
+            var gestureLayers = gesture.GetLayers().ToArray();
+            if (fxLayers.Length != gestureLayers.Length) {
+                throw new Exception("Gesture+FX copy didn't match in length");
+            }
+
+            var layersToKeep = new HashSet<AnimatorStateMachine>();
+            var layersToKeepBehaviors = new HashSet<AnimatorStateMachine>();
+            foreach (var (fxLayer,gestureLayer) in fxLayers.Zip(gestureLayers, (a,b) => (a,b))) {
+                var typesForLayer = new AnimatorIterator.Clips().From(fxLayer)
+                    .SelectMany(clip => clip.GetAllBindings())
+                    .Select(GetLayerTypeForBinding)
+                    .ToImmutableHashSet();
+
+                if (typesForLayer.Contains(BindingType.Gesture) && typesForLayer.Contains(BindingType.FX)) {
+                    layersToKeep.Add(fxLayer);
+                    layersToKeep.Add(gestureLayer);
+                    layersToKeepBehaviors.Add(fxLayer);
+                } else if (typesForLayer.Contains(BindingType.Gesture)) {
+                    layersToKeep.Add(gestureLayer);
+                    layersToKeepBehaviors.Add(gestureLayer);
+                } else {
+                    layersToKeep.Add(fxLayer);
+                    layersToKeepBehaviors.Add(fxLayer);
+                }
+            }
+
+            KeepLayersDrivingUsedParams(fx.GetRaw(), layersToKeep);
+            KeepLayersDrivingUsedParams(gesture.GetRaw(), layersToKeep);
+
+            foreach (var layer in fx.GetLayers().Concat(gesture.GetLayers())) {
+                if (!layersToKeep.Contains(layer)) {
+                    layer.Remove();
+                    continue;
+                }
+                if (!layersToKeepBehaviors.Contains(layer)) {
+                    AnimatorIterator.ForEachBehaviourRW(
+                        layer,
+                        (b, add) => false
+                    );
+                }
+            }
+
+            foreach (var layer in fx.GetLayers()) {
+                foreach (var clip in new AnimatorIterator.Clips().From(layer)) {
+                    clip.Rewrite(AnimationRewriter.RewriteBinding(b => {
+                        if (GetLayerTypeForBinding(b) == BindingType.Gesture) return null;
+                        return b;
+                    }, false));
+                }
+            }
+            foreach (var layer in gesture.GetLayers()) {
+                foreach (var clip in new AnimatorIterator.Clips().From(layer)) {
+                    clip.Rewrite(AnimationRewriter.RewriteBinding(b => {
+                        if (GetLayerTypeForBinding(b) == BindingType.FX) return null;
+                        return b;
+                    }, false));
+                }
+            }
         }
-        
+
+        enum BindingType {
+            Gesture,
+            FX,
+            Animator
+        }
+        private static BindingType GetLayerTypeForBinding(EditorCurveBinding binding) {
+            if (binding.IsMuscle() || binding.IsProxyBinding() || binding.type == typeof(Transform)) {
+                return BindingType.Gesture;
+            } else if (binding.path == "" && binding.type == typeof(Animator)) {
+                return BindingType.Animator;
+            } else {
+                return BindingType.FX;
+            }
+        }
+
+        private static void KeepLayersDrivingUsedParams(VFController ctrl, HashSet<AnimatorStateMachine> layersToKeep) {
+            while (true) {
+                var myKeptLayers = ctrl.GetLayers()
+                    .Select(l => l.stateMachine)
+                    .Where(layersToKeep.Contains)
+                    .ToHashSet();
+                var paramsUsed = new HashSet<string>();
+                ((AnimatorController)ctrl).RewriteParameters(
+                    str => { paramsUsed.Add(str); return str; },
+                    false,
+                    myKeptLayers
+                );
+                var layersControllingThoseParams = ctrl.GetLayers()
+                    .Where(layer => LayerControlsOneOfParams(layer, paramsUsed))
+                    .Select(l => l.stateMachine)
+                    .ToImmutableHashSet();
+                if (myKeptLayers.Intersect(layersControllingThoseParams).Count() == layersControllingThoseParams.Count) {
+                    // Found no new layers to keep
+                    break;
+                }
+                layersToKeep.UnionWith(layersControllingThoseParams);
+            }
+        }
+
+        private static bool LayerControlsOneOfParams(VFLayer layer, ICollection<string> prms) {
+            return new AnimatorIterator.Clips().From(layer)
+                .SelectMany(clip => clip.GetFloatBindings())
+                .Any(binding => binding.type == typeof(Animator)
+                                && binding.path == ""
+                                && prms.Contains(binding.propertyName));
+        }
+
         [FeatureBuilderAction(FeatureOrder.FixMasks)]
         public void FixMasks() {
+            // Remove redundant FX masks if they're not needed
             foreach (var layer in GetFx().GetLayers()) {
-                // For any layers we added to FX without masks, give them the default FX mask
-                if (layer.mask == null) {
-                    layer.mask = AvatarMaskExtensions.DefaultFxMask();
-                }
-                
-                // Remove redundant FX masks if they're not needed
-                if (layer.mask.AllowsAllTransforms() && !layer.HasMuscles()) {
+                if (layer.mask != null && layer.mask.AllowsAllTransforms()) {
                     layer.mask = null;
                 }
             }
 
-            foreach (var c in manager.GetAllUsedControllers()) {
-                var ctrl = c.GetRaw();
-
-                AvatarMask expectedMask = null;
-                if (c.GetType() == VRCAvatarDescriptor.AnimLayerType.Gesture) {
-                    expectedMask = GetGestureMask(c);
-                } else if (c.GetType() == VRCAvatarDescriptor.AnimLayerType.FX) {
-                    expectedMask = GetFxMask(c);
-                }
-
-                var layer0 = ctrl.GetLayer(0);
-                // If there are no layers, we still create a base layer because the VRCSDK freaks out if there is a
-                //   controller with no layers
-                // On FX, ALWAYS make an empty base layer, because for some reason transition times can break
-                //   and animate immediately when performed within the base layer
-                if (layer0 == null || layer0.mask != expectedMask || c.GetType() == VRCAvatarDescriptor.AnimLayerType.FX) {
-                    c.EnsureEmptyBaseLayer().mask = expectedMask;
-                }
-            }
-        }
-
-        /**
-         * We build the gesture base mask by unioning all the masks from the other layers.
-         */
-        private AvatarMask GetGestureMask(ControllerManager gesture) {
-            var mask = AvatarMaskExtensions.Empty();
-            foreach (var layer in gesture.GetLayers()) {
-                if (layer.mask == null) throw new Exception("Gesture layer unexpectedly contains no mask");
-                mask.UnionWith(layer.mask);
-            }
-            return mask;
-        }
-
-        private bool DoesFxControlHands() {
-            return manager.GetFx().GetLayers()
-                .Any(layer => layer.mask != null &&
-                              (layer.mask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers)
-                               || layer.mask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers)));
-        }
-
-        /**
-         * If a project uses WD off, and animates ANY muscle within a controller, that controller "claims ownership"
-         * of every muscle allowed by its mask. This means that it's very important that we only allow FX to
-         * have as few muscles as possible, because animating hands within FX would bust the entire rest of the avatar
-         * if the mask allowed it.
-         */
-        private AvatarMask GetFxMask(ControllerManager fx) {
-            if (DoesFxControlHands()) {
-                var mask = AvatarMaskExtensions.DefaultFxMask();
-                mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers, true);
-                mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers, true);
-                return mask;
-            }
-
-            return null;
+            GetFx().EnsureEmptyBaseLayer().mask = null;
+            
+            var gestureMask = AvatarMaskExtensions.Empty();
+            gestureMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers, true);
+            gestureMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers, true);
+            gestureMask.AllowAllTransforms();
+            manager.GetController(VRCAvatarDescriptor.AnimLayerType.Gesture).EnsureEmptyBaseLayer().mask = gestureMask;
         }
     }
 }

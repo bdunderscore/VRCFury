@@ -20,5 +20,9 @@ namespace VF.Utils {
         public IEnumerable<A> GetKeys() {
             return data.Keys;
         }
+
+        public bool ContainsValue(B value) {
+            return data.Values.Any(list => list.Contains(value));
+        }
     }
 }
